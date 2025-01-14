@@ -3,7 +3,7 @@ library(limma)
 library(ggpubr)
 set.seed(123)
 
-inputFile="GSE38713.txt"       #输入文件
+inputFile="GSE57691.txt"       #输入文件
 C="Control"                        #正常组样本名称
 
 #读取输入文件
