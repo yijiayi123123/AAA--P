@@ -1,0 +1,117 @@
+### 加载所需R包
+# CIBERSORT包安装代码
+#install.packages('devtools')
+library(devtools)
+#if(!require(CIBERSORT))devtools::install_github("Moonerss/CIBERSORT")
+#devtools::install_github("Moonerss/CIBERSORT")
+library(CIBERSORT)
+library(ggcorrplot)
+library(tidyr)
+library(limma)
+
+### 导入基因表达谱和数据cibersort运算结果 --------------------------------------------------------------------
+DEG_expr <- read.csv("DEG_expr.csv",row.names = 1)#行为基因名，列为样本名（“DEG_expr.csv”为标准化后的矩阵表达谱），文件格式需要注意或者相互转化
+cibersort_result <- read.csv("cibersort_result.csv",row.names = 1)#行名样本名，列名免疫细胞浸润评分
+
+# 注意：若上述的表达谱未标准化，最好经过下面代码进行标准化处理；如已标准化，则不需要处理#
+boxplot(DEG_expr,outline=FALSE, notch=F , las=2)#绘制箱线图检测标准化
+DEG_expr=normalizeBetweenArrays(DEG_expr)#标准化
+boxplot(DEG_expr,outline=FALSE, notch=F , las=2)#绘制箱线图检测标准化
+
+### 数据格式整理
+data <- t(DEG_expr)#数据转置，行名是样本名，列名基因名
+cibersort_result <- cibersort_result[,1:22]#取cibersort前22列数据
+### check一下（这部跑一下就行）
+identical(rownames(data),rownames(cibersort_result))
+
+### 提取所用基因
+data <- data[,c("MRPL58","E2F1","AAAS","NDUFA9")]#提取所需hubgenes，用于下一步分析
+data <- as.data.frame(data)
+
+###检测数据（每个基因表达量在样本中）是否符合正态分布，根据样本量（N=50）进行算法选择
+#注意：样本量N≤50，选择Shapiro-Wilk检验；N＞50，选择Kolmogorov-Smirnov检验
+# Shapiro-Wilk检验
+shapiro.test(data$MRPL58)#适用于小样本数据，N≤50
+# Kolmogorov-Smirnov检验(柯尔莫哥洛夫检验)
+ks.test(data$MRPL58, pnorm, mean = mean(data$MRPL58), sd = sd(data$MRPL58))#适用于大样本数据，N＞50
+
+###计算基因与免疫细胞相关性系数
+#注意：一般生信研究都会纳入2-5甚至更多的hubgenes，因此不一定能够保证所有的基因都符合正态分布
+#若某些基因不符合正态分布，建议所有基因都尝试同一种相关系数算法，（spearman（非正态）或pearson（正态）），一般结果不会相差很大（但做法不太科学严谨）
+# 封装一个函数来快速计算hubgenes相关系数 -------------------------------------------------------------
+# spearman相关性分析#
+calculate_correlation <- function(Gene_expr, cibersort_result) {
+  cor_matrix <- data.frame("Gene" = character(),"im_cell" = character(),"Cor" = numeric(),"p-value" = numeric(), stringsAsFactors = FALSE)
+  
+  for (i in 1:ncol(cibersort_result)) {
+    result <- cor.test(Gene_expr, cibersort_result[, i], method = "spearman")
+    new_row <- data.frame("Gene" = "Gene", "im_cell" = colnames(cibersort_result)[i], "Cor" = result$estimate, "p-value" = result$p.value)
+    cor_matrix <- rbind(cor_matrix, new_row)
+  }
+  return(cor_matrix)
+}
+# pearson相关性分析#
+calculate_correlation <- function(Gene_expr, cibersort_result) {
+  cor_matrix <- data.frame("Gene" = character(),"im_cell" = character(),"Cor" = numeric(),"p-value" = numeric(), stringsAsFactors = FALSE)
+  
+  for (i in 1:ncol(cibersort_result)) {
+    result <- cor.test(Gene_expr, cibersort_result[, i], method = "pearson")
+    new_row <- data.frame("Gene" = "Gene", "im_cell" = colnames(cibersort_result)[i], "Cor" = result$estimate, "p-value" = result$p.value)
+    cor_matrix <- rbind(cor_matrix, new_row)
+  }
+  return(cor_matrix)
+}
+
+### 继续计算所需hub基因与免疫细胞浸润分数的相关性 -----------------------------------------------------
+# 选择要计算相关性的列
+###获得基因-免疫细胞相关系数结果
+data_to_calculate <- data
+# 新建一个空的数据框保存结果
+results <- data.frame("Gene" = character(),"im_cell" = character(),"Cor" = numeric(),"p-value" = numeric(), stringsAsFactors = FALSE)
+# 使用for循环遍历数据框中的每一列，并计算相关性
+for (i in 1:ncol(data_to_calculate)) {
+  print(i)
+  gene_expr <- data_to_calculate[, i]
+  corr_result <- calculate_correlation(gene_expr, cibersort_result)
+  # 将每次计算的结果添加到新的数据框中
+  results <- rbind(results, corr_result)
+}
+# 查看列名，下方修改的依据
+colnames(data_to_calculate)
+# 手动修改每一个基因名称
+results$Gene <- c(rep("MRPL58", 22),
+                  rep("E2F1", 22),
+                  rep("AAAS", 22),
+                  rep("NDUFA9", 22))
+
+###数据导出保存
+write.csv(results, file = "cor_results.csv")
+###在Excel中用1 to n的序列替换第一列rho序列，并删除没有结果的免疫细胞结果
+cor_results<-read.csv("cor_results.csv",row.names = 1,header = T,sep = ",")
+head(cor_results)
+table(cor_results$Gene)
+table(cor_results$im_cell)
+
+### 创建基因与免疫细胞热图 -------------------------------------------------------------
+#下面的代码可以适当修改，以跑出好看的图片
+pdf(file="correlation_heatmap.pdf",width = 10,height = 8)
+ggplot(cor_results, aes(x = Gene, y = im_cell, fill = Cor)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "#2166AC", mid = "white", high = "#B2182D", limits = c(-1, 1))+ 
+  labs(title = "Correlation between immune cells and genes", x = "Gene", y = "Immune Cell") + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=0.5)) +
+  # 根据p值使用不同的符号
+  geom_text(aes(label = ifelse(p.value < 0.001, "***",  
+                               ifelse(p.value < 0.01, "**",
+                                      ifelse(p.value < 0.05, "*","")))), size = 3, color = "black", hjust = 0.5) +
+  scale_y_discrete(limits = rev(levels(cor_results$im_cell))) +
+  # 对图中的字体进行美化、修改
+  theme(axis.text.x = element_text(size = 15),  
+        axis.text.y = element_text(size = 15),
+        axis.title=element_text(size=20),
+        panel.background = element_rect(fill = "white", color = "grey"),
+        strip.background = element_rect(fill = "lightgray", color = "grey"),
+        panel.grid.major = element_line(color = "grey"),
+        panel.grid.minor = element_line(color = "grey", size = 0.5),
+        panel.margin = unit(5, "lines"))  
+dev.off() 
