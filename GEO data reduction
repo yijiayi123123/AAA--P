@@ -1,0 +1,79 @@
+if(!requireNamespace("BiocManager",quietly = T))
+  install.packages("BiocManager")
+if(!requireNamespace("tidyverse",quietly = T))
+  install.packages("tidyverse",force = TRUE)
+if(!requireNamespace("limma",quietly = T))
+  BiocManager::install("limma",force = TRUE)
+library(tidyverse)
+library(limma)
+##将数据加载好
+exp <- read.table("GSE43525_series_matrix.txt",header=T,
+               sep="\t",dec=".",
+               comment.char="!",na.strings =c("NA"),fill=T )#读取基因表达矩阵
+plate <- read.table("GPL10558-50081.txt",header=T,
+                    quote="",sep="\t",dec=".",
+                    comment.char="#",na.strings =c("NA"),fill=T )#读取平台文件（GPL）
+
+##############################下面我们有两种处理一个探针应对多个基因的问题#####################
+#第一种方式抽取多个基因中的第一个
+ID <- data.frame(ID_REF = plate$ID, Symbol = plate$Symbol)#将平台文件的ID列和SYMBOL列取出
+ID$Symbol <-data.frame(sapply(ID$Symbol,function(x)unlist(strsplit(x,"///"))[1]),stringsAsFactors=F)[,1]
+exp <- as.data.frame(exp)
+exp <- merge(exp, ID, by='ID_REF')#merge()函数将dat1的探针id与芯片平台探针id相匹配，合并到dat1
+exp[, grep("Symbol", colnames(exp))] <-  trimws(exp[, grep("Symbol", colnames(exp))])#去除数据头尾空格
+exp[exp == ""] <- NA#将空白负值NA
+exp <- na.omit(exp)#删除GENE_SYBOL缺失的数据
+
+#############几种处理重复基因的方式，下面的方式选择一种就行了##################
+table(duplicated(exp$Symbol))#看一下有多少重复
+#第一种，将重复基因取平均值
+exp1 <- avereps(exp, ID = exp$Symbo)
+exp1 <- as.data.frame(exp1)
+rownames(exp1) <- exp1$Symbol#加上行名
+exp1 <- exp1[,-c(1,ncol(exp1))]#将多余列的数据剔除
+write.csv(exp1, "exp_average.csv")#保存为csv格式
+
+#第二种，取重复基因中的最大值
+exp2 <- aggregate(exp,by=list(exp$Symbol),FUN= max,na.rm=T) 
+rownames(exp2) <- exp2$Group.1#加上行名
+exp2 <- exp2[,-c(1,2,ncol(exp2))]#将多余列的数据剔除
+write.csv(exp2, "exp_max.csv")#保存为csv格式
+
+#第三种，取重复基因中的最小值
+exp3 <- aggregate(exp,by=list(exp$Symbol), FUN= min, na.rm=T) 
+rownames(exp3) <- exp3$Group.1#加上行名
+exp3 <- exp3[,-c(1,2,ncol(exp3))]#将多余列的数据剔除
+write.csv(exp3, "exp_min.csv")#保存为csv格式
+
+
+#第二种方式将每一个基因都对应出来
+ID <- data.frame(ID_REF = plate$ID, Gene_Symbol = plate$Gene.Symbol)#将平台文件的ID列和SYMBOL列取出
+x <- tibble(unlist(apply(ID,1,function(x){paste(x[1],str_split(x[2],'///',simplify=T),sep = "...")})))
+colnames(x) <- "ABC" 
+gpl_file <- separate(x,ABC,c("ID_REF","Gene_Symbol"),sep = "\\...")#处理一个探针对应多个基因
+exp <- as.data.frame(exp)#将表达矩阵转换为数据框
+exp <- merge(exp,gpl_file,by="ID_REF")#以ID为参照值，对表达矩阵和GPL进行合并
+exp[, grep("Gene_Symbol", colnames(exp))] <-  trimws(exp[, grep("Gene_Symbol", colnames(exp))])#去除数据头尾空格
+exp[exp_symbol == ""]<-NA#将空白负值NA
+exp <- na.omit(exp)#删除GENE_SYBOL缺失的数据
+
+#############几种处理重复基因的方式，下面的方式选择一种就行了##################
+table(duplicated(exp$Gene_Symbol))#看一下有多少重复
+#第一种，将重复基因取平均值
+exp1 <- avereps(exp, ID = exp$Gene_Symbo)
+exp1 <- as.data.frame(exp1)
+rownames(exp1) <- exp1$Gene_Symbol#加上行名
+exp1 <- exp1[,-c(1,ncol(exp1))]#将多余列的数据剔除
+write.csv(exp1, "exp_average.csv")#保存为csv格式
+
+#第二种，取重复基因中的最大值
+exp2 <- aggregate(exp,by=list(exp$Gene_Symbol),FUN= max,na.rm=T) 
+rownames(exp2) <- exp2$Group.1#加上行名
+exp2 <- exp2[,-c(1,2,ncol(exp2))]#将多余列的数据剔除
+write.csv(exp2, "exp_max.csv")#保存为csv格式
+
+#第三种，取重复基因中的最小值
+exp3 <- aggregate(exp,by=list(exp$Gene_Symbol), FUN= min, na.rm=T) 
+rownames(exp3) <- exp3$Group.1#加上行名
+exp3 <- exp3[,-c(1,2,ncol(exp3))]#将多余列的数据剔除
+write.csv(exp3, "exp_min.csv")#保存为csv格式
